@@ -104,6 +104,42 @@ Instead of setting up the frontend and backend manually, you can run the entire 
 
 ---
 
+## Reverse Proxy Deployment
+
+For local `docker compose`, the frontend builds with `VITE_BASE_PATH=/` and is served at `http://localhost:3000`.
+
+For the shared reverse proxy deployment on `cmedia.offis.de`, build the frontend image with:
+
+```sh
+podman build --build-arg VITE_BASE_PATH=/freeze-me/ -t rm_freeze_me_frontend:latest ./frontend
+```
+
+The reverse proxy is expected to expose:
+
+- `https://cmedia.offis.de/freeze-me/` for the frontend
+- `https://cmedia.offis.de/freeze-me/backend/` for the backend API
+
+On the server, the corresponding containers should be started on the shared proxy network as:
+
+- `rm_freeze_me_frontend`
+- `rm_freeze_me_backend`
+
+To make the server steps repeatable, this repo now includes:
+
+- [`scripts/build-server-images.sh`](/home/svc-cmedia/projects/freeze-me/scripts/build-server-images.sh) to build the two Podman images with the correct defaults
+- [`scripts/start-server-containers.sh`](/home/svc-cmedia/projects/freeze-me/scripts/start-server-containers.sh) as a ready-to-run or ready-to-paste startup block for the server's container runner
+
+Typical server usage:
+
+```sh
+bash scripts/build-server-images.sh
+bash scripts/start-server-containers.sh
+```
+
+The shared reverse-proxy tutorial also includes a concrete Freeze Me example in [`reverse-proxy-tutorial.md`](/home/svc-cmedia/projects/reverse-proxy/reverse-proxy-tutorial.md).
+
+---
+
 ## Useful links
 - **Vue3 Introduction:** https://vuejs.org/guide/introduction.html
 - **Vuetify Documentation:** https://vuetifyjs.com/en/components/buttons/#usage

@@ -1,6 +1,9 @@
 # Stage 1: Build the Vue app
 FROM node:20-alpine AS build
 
+ARG VITE_BASE_PATH=/
+ENV VITE_BASE_PATH=${VITE_BASE_PATH}
+
 WORKDIR /app
 
 COPY package.json package-lock.json ./

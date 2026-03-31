@@ -17,26 +17,27 @@ MULTIPLE_INSTANCES_FOLDER = "multiple_instances"
 WORKFLOW_DATA_FILE="workflow.json"
 
 def get_config_path():
-    path = os.environ.get("SAM_VERSION").__str__().lower()
-    if path is None:
-        print("SAM_VERSION environment variable is not set")
-        print("Possible values are: large, b_plus, small, tiny")
-        print("Defaulting to small")
+    version = os.environ.get("SAM_VERSION", "small").lower()
+    match version:
+        case "large":
+            config_name = "sam2.1_hiera_l.yaml"
+        case "b_plus":
+            config_name = "sam2.1_hiera_b+.yaml"
+        case "tiny":
+            config_name = "sam2.1_hiera_t.yaml"
+        case _:
+            config_name = "sam2.1_hiera_s.yaml"
+
+    # Try local config file first (works with SAM2 installed from source)
     prefix_path = Path.cwd()
-    print(prefix_path)
-    print(os.path.dirname(prefix_path))
     if prefix_path.parent.__eq__("backend"):
         prefix_path = prefix_path.parent
-    match path:
-        case "large":
-            path = prefix_path.joinpath(CONFIG_PATH).joinpath("sam2.1_hiera_l.yaml").absolute()
-        case "b_plus":
-            path = prefix_path.joinpath(CONFIG_PATH).joinpath("sam2.1_hiera_b+.yaml").absolute()
-        case "tiny":
-            path = prefix_path.joinpath(CONFIG_PATH).joinpath("sam2.1_hiera_t.yaml").absolute()
-        case _:
-            path = prefix_path.joinpath(CONFIG_PATH).joinpath("sam2.1_hiera_s.yaml").absolute()
-    return path.as_posix()
+    local_path = prefix_path.joinpath(CONFIG_PATH).joinpath(config_name)
+    if local_path.exists():
+        return local_path.absolute().as_posix()
+
+    # Fall back to SAM2 package's built-in Hydra config (pip-installed sam2)
+    return f"configs/sam2.1/{config_name}"
 
 def get_checkpoint_path():
     path = os.environ.get("SAM_VERSION").__str__().lower()

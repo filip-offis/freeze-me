@@ -5,15 +5,23 @@ from concurrent.futures.thread import ThreadPoolExecutor
 from pathlib import Path
 from timeit import default_timer as timer
 
-import cupy
-import cupyx
 import cv2
 import numpy as np
 import supervision as sv
 import torch
 from PIL import Image
-from cupyx.scipy import ndimage
 from fastapi import UploadFile
+
+try:
+    import cupy
+    import cupyx
+    from cupyx.scipy import ndimage
+    HAS_CUPY = True
+except ImportError:
+    cupy = None
+    cupyx = None
+    ndimage = None
+    HAS_CUPY = False
 
 from path_manager import get_background_image, get_background_temp_image_path
 from path_manager import get_background_temp_image_folder

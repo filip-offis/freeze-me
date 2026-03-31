@@ -81,6 +81,29 @@ Recommended, but optional:
 
 ---
 
+### 3. Docker Compose (Alternative)
+
+Instead of setting up the frontend and backend manually, you can run the entire application with Docker Compose:
+
+1. **Prerequisites:**
+   - [Docker](https://docs.docker.com/get-docker/) installed and running
+
+2. **Start the application:**
+   ```sh
+   docker compose up --build
+   ```
+
+   This builds both the frontend and backend images (including downloading the SAM2 small checkpoint) and starts them together. The app will be available at `http://localhost:3000`.
+
+3. **Stop the application:**
+   ```sh
+   docker compose down
+   ```
+
+> **Note:** The Docker setup runs in CPU-only mode. For GPU-accelerated segmentation, use the manual setup described above.
+
+---
+
 ## Useful links
 - **Vue3 Introduction:** https://vuejs.org/guide/introduction.html
 - **Vuetify Documentation:** https://vuetifyjs.com/en/components/buttons/#usage

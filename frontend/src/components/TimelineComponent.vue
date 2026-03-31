@@ -2,6 +2,13 @@
 import {onMounted, ref, watch} from "vue";
 import {store} from "@/store.js";
 import axios from "axios";
+import videoCutAvailable from "@/assets/workflow/video-cut-available.svg";
+import segmentationAvailable from "@/assets/workflow/segmentation-available.svg";
+import segmentationUnavailable from "@/assets/workflow/segmentation-unavailable.svg";
+import mainEffectAvailable from "@/assets/workflow/main-effect-available.svg";
+import mainEffectUnavailable from "@/assets/workflow/main-effect-unavailable.svg";
+import afterEffectAvailable from "@/assets/workflow/after-effect-available.svg";
+import afterEffectUnavailable from "@/assets/workflow/after-effect-unavailable.svg";
 
 const segmentation = ref(store.steps.segmentation);
 const main_effect = ref(store.steps.mainEffect);
@@ -78,28 +85,28 @@ const goToStep = (step) => {
 <template>
   <v-card v-if="video_id" class="progress-line" elevation="4">
     <v-card class="step-card clickable" elevation="3" @click="goToStep('video-editing')">
-      <img :src="'src/assets/workflow/video-cut-available.svg'"
+      <img :src="videoCutAvailable"
          class="progress-icon" :class="props.modelValue === 1 ? 'current-step' : '' ">
       <p>Video Editing</p>
     </v-card>
 
     <span class="divider" :class="segmentation ? 'colored-divider' : ''"></span>
     <v-card class="step-card" :class="segmentation ? 'clickable' : ''" elevation="3" @click="goToStep('segmentation')" :disabled="!segmentation">
-      <img :src="segmentation ? 'src/assets/workflow/segmentation-available.svg' : 'src/assets/workflow/segmentation-unavailable.svg'"
+      <img :src="segmentation ? segmentationAvailable : segmentationUnavailable"
          class="progress-icon" :class="props.modelValue === 2 ? 'current-step' : '' ">
       <p>Segmentation</p>
     </v-card>
 
     <span class="divider" :class="main_effect ? 'colored-divider' : ''"></span>
     <v-card class="step-card" :class="main_effect ? 'clickable' : ''" elevation="3" @click="goToStep('main-effect')" :disabled="!main_effect">
-      <img :src="main_effect ? 'src/assets/workflow/main-effect-available.svg' : 'src/assets/workflow/main-effect-unavailable.svg'"
+      <img :src="main_effect ? mainEffectAvailable : mainEffectUnavailable"
          class="progress-icon" :class="props.modelValue === 3 ? 'current-step' : '' ">
       <p>Main-Effect</p>
     </v-card>
 
     <span class="divider" :class="after_effect ? 'colored-divider' : ''"></span>
     <v-card class="step-card" :class="after_effect ? 'clickable' : ''" elevation="3" @click="goToStep('after-effect')" :disabled="!after_effect">
-      <img :src="after_effect ? 'src/assets/workflow/after-effect-available.svg' : 'src/assets/workflow/after-effect-unavailable.svg'"
+      <img :src="after_effect ? afterEffectAvailable : afterEffectUnavailable"
          class="progress-icon" :class="props.modelValue === 4 ? 'current-step' : '' ">
       <p>After-Effects</p>
     </v-card>

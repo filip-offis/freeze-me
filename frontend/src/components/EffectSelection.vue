@@ -51,7 +51,7 @@ onMounted(async () => {
   isLoading.value = true;
   videoId.value = store.selectedVideoId;
   if (videoId.value == null) {
-    router.push({ path: "/" });
+    router.push({ name: 'main' });
     return;
   }
   if (store.selectedBackground != null) {

@@ -25,7 +25,7 @@ const nextPage = () => {
 onMounted(async () => {
   videoId.value = store.selectedVideoId;
   if (!videoId.value) {
-    router.push({ path: "/" });
+    router.push({ name: 'main' });
     return;
   }
   await loadPreview(); // Initiales Laden des Bildes

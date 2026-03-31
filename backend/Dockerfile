@@ -26,14 +26,19 @@ WORKDIR /app/src
 # Create runtime directories
 RUN mkdir -p videos
 
-# Download SAM2 small checkpoint to /app/checkpoints/ (the app strips one
-# directory level from CWD, so it looks for checkpoints in the parent dir)
+# Download the checkpoint matching the configured SAM version.
 ARG SAM_VERSION=small
+ENV SAM_VERSION=${SAM_VERSION}
 RUN mkdir -p /app/checkpoints && \
-    curl -fSL -o /app/checkpoints/sam2.1_hiera_small.pt \
-    "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_small.pt"
+    case "$SAM_VERSION" in \
+        large) checkpoint_name="sam2.1_hiera_large.pt" ;; \
+        b_plus) checkpoint_name="sam2.1_hiera_base_plus.pt" ;; \
+        tiny) checkpoint_name="sam2.1_hiera_tiny.pt" ;; \
+        *) checkpoint_name="sam2.1_hiera_small.pt" ;; \
+    esac && \
+    curl -fSL -o "/app/checkpoints/${checkpoint_name}" \
+    "https://dl.fbaipublicfiles.com/segment_anything_2/092824/${checkpoint_name}"
 
-ENV SAM_VERSION=small
 ENV PYTORCH_ENABLE_MPS_FALLBACK=1
 
 EXPOSE 8000

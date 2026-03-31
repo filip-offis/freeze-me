@@ -43,7 +43,7 @@ onMounted(async () => {
     loadingText.value = ""
     await updateVideoDetails()
   } else {
-    await router.push("/gallery")
+    await router.push({ name: 'gallery' })
   }
 })
 

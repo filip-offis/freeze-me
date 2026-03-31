@@ -3,6 +3,14 @@ import { onMounted, ref } from 'vue'; // Import lifecycle hook and ref from Vue
 import { store } from '../store';// Import the global store to access shared state
 import { useRouter } from 'vue-router';
 import axios from "axios"; // Import Vue Router for navigation
+import videoCutAvailable from "@/assets/workflow/video-cut-available.svg";
+import videoCutUnavailable from "@/assets/workflow/video-cut-unavailable.svg";
+import segmentationAvailable from "@/assets/workflow/segmentation-available.svg";
+import segmentationUnavailable from "@/assets/workflow/segmentation-unavailable.svg";
+import mainEffectAvailable from "@/assets/workflow/main-effect-available.svg";
+import mainEffectUnavailable from "@/assets/workflow/main-effect-unavailable.svg";
+import afterEffectAvailable from "@/assets/workflow/after-effect-available.svg";
+import afterEffectUnavailable from "@/assets/workflow/after-effect-unavailable.svg";
 
 // Reactive reference to hold the list of images
 const videos = ref([]);
@@ -50,7 +58,7 @@ const handleVideoClick = (video) => {
   store.steps.segmentation= video.available_steps.indexOf('segmentation') >= 0
   store.steps.mainEffect= video.available_steps.indexOf('main-effect') >= 0
   store.steps.afterEffect= video.available_steps.indexOf('after-effect') >= 0
-  router.push("/")
+  router.push({ name: 'main' })
 };
 </script>
 
@@ -64,16 +72,16 @@ const handleVideoClick = (video) => {
           <button class="delete-btn" @click.stop="deleteVideo(video)">❌</button>
           <img class="video" :src="video.thumbnail" @click="handleVideoClick(video)" alt="Thumbnail of video">
           <div class="progress-line">
-            <img :src="video.available_steps.indexOf('video-editing') >= 0 ? 'src/assets/workflow/video-cut-available.svg' : 'src/assets/workflow/video-cut-unavailable.svg'"
+            <img :src="video.available_steps.indexOf('video-editing') >= 0 ? videoCutAvailable : videoCutUnavailable"
                  class="progress-icon">
             <span class="divider"></span>
-            <img :src="video.available_steps.indexOf('segmentation') >= 0 ? 'src/assets/workflow/segmentation-available.svg' : 'src/assets/workflow/segmentation-unavailable.svg'"
+            <img :src="video.available_steps.indexOf('segmentation') >= 0 ? segmentationAvailable : segmentationUnavailable"
                  class="progress-icon">
             <span class="divider"></span>
-            <img :src="video.available_steps.indexOf('main-effect') >= 0 ? 'src/assets/workflow/main-effect-available.svg' : 'src/assets/workflow/main-effect-unavailable.svg'"
+            <img :src="video.available_steps.indexOf('main-effect') >= 0 ? mainEffectAvailable : mainEffectUnavailable"
                  class="progress-icon">
             <span class="divider"></span>
-            <img :src="video.available_steps.indexOf('after-effect') >= 0 ? 'src/assets/workflow/after-effect-available.svg' : 'src/assets/workflow/after-effect-unavailable.svg'"
+            <img :src="video.available_steps.indexOf('after-effect') >= 0 ? afterEffectAvailable : afterEffectUnavailable"
                  class="progress-icon">
           </div>
         </div>

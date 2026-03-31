@@ -1,14 +1,20 @@
 services:
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        SAM_VERSION: ${SAM_VERSION:-small}
     environment:
-      - SAM_VERSION=small
+      SAM_VERSION: ${SAM_VERSION:-small}
     volumes:
       - freeze-me-videos:/app/src/videos
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
     ports:
       - "3000:80"
     depends_on:

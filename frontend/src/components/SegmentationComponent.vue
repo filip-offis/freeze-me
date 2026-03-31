@@ -4,6 +4,8 @@ import {store} from "../store.js";
 import axios from "axios";
 import router from "@/router/index.js";
 import InfoButton from "@/components/InfoButton.vue";
+import posDot from "@/assets/posDot.svg";
+import negDot from "@/assets/negDot.svg";
 
 const isLoading = ref(false);
 const loadingText = ref("");
@@ -36,7 +38,7 @@ onMounted(async () => {
   try {
     videoId.value = store.selectedVideoId;
     if (videoId.value == null) {
-      router.push({path: '/'})
+      router.push({ name: 'main' })
       return;
     }
     await axios.get(`${store.apiUrl}/initialize-segmentation?video_id=` + videoId.value)
@@ -149,7 +151,7 @@ const moveToSegmentationResult = async () => {
     <div v-if="!segmentedVideo" class="frame-wrapper">
       <div class="wrapper">
         <img v-if="displayedFrame" :src="displayedFrame" @click.stop="handleImageClick" class="segmentation-image" ismap/>
-        <img v-if="selectedX && selectedY" :src="pointType === 'Additive' ? 'src/assets/posDot.svg' : 'src/assets/negDot.svg'" class="select-dot" :width="dotSize" :height="dotSize"/>
+        <img v-if="selectedX && selectedY" :src="pointType === 'Additive' ? posDot : negDot" class="select-dot" :width="dotSize" :height="dotSize"/>
       </div>
       <div v-if="!segmentedVideo" class="controls">
         <v-slider

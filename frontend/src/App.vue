@@ -24,12 +24,12 @@ const resetStore = () => {
         <v-app-bar-title>Freeze Me</v-app-bar-title>
       </div>
       <!-- Link to the main view -->
-      <v-btn class="d-flex mr-4 no-focus-highlight" variant="outlined" prepend-icon="mdi-home" link to="/" @click="resetStore">
+      <v-btn class="d-flex mr-4 no-focus-highlight" variant="outlined" prepend-icon="mdi-home" link :to="{ name: 'main' }" @click="resetStore">
           Create New Project
       </v-btn>
 
       <!-- Link to the gallery view -->
-      <v-btn class="d-flex no-focus-highlight" variant="outlined" prepend-icon="mdi-image" link to="/gallery">
+      <v-btn class="d-flex no-focus-highlight" variant="outlined" prepend-icon="mdi-image" link :to="{ name: 'gallery' }">
           Projects
       </v-btn>
     </div>

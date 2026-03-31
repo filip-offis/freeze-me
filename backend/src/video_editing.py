@@ -88,7 +88,7 @@ async def get_video_details(video_id):
     try:
         path = get_upload_path(video_id)
         image_folder = get_images_path(video_id)
-        details = ffmpeg.probe(path.__str__(), cmd="static_ffprobe")
+        details = ffmpeg.probe(path.__str__(), cmd="ffprobe")
         video_stream = None
         for stream in details["streams"]:
             if stream["codec_type"] == "video":
@@ -177,17 +177,12 @@ async def get_masked_video(video_id):
         video_path = get_upload_path(video_id)
         video_info = sv.VideoInfo.from_video_path(video_path.__str__())
         frames_paths = sorted(sv.list_files_with_extensions(directory=image_path.__str__(), extensions=["jpeg"]))
-        background_paths = []
-        background_frames = []
-        foreground_paths = []
-        foreground_frames = []
         # run propagation throughout the video and collect the results in a dict
         temp_file = get_temp_file_path(video_id)
-        frames = read_images(frames_paths)
         with sv.VideoSink(temp_file.__str__(), video_info=video_info) as sink:
             for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state,
                                                                                             start_frame_idx=0):
-                frame = frames[out_frame_idx]
+                frame = cv2.imread(str(frames_paths[out_frame_idx]))
                 masks = (out_mask_logits > 0.0).cpu().numpy()
                 n, x, h, w = masks.shape
                 masks = masks.reshape(n * x, h, w)
@@ -198,24 +193,24 @@ async def get_masked_video(video_id):
                 )
                 base_path = Path(os.path.basename(frames_paths[out_frame_idx])).stem
 
-                # Create foreground cut frames
+                # Create and write foreground cut frame immediately
                 transparent_foreground = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
                 transparent_foreground[:, :, 3] = masks.astype(np.uint8) * 255
-                foreground_paths.append(get_foreground_temp_image_folder(video_id).joinpath(base_path + ".png"))
-                foreground_frames.append(transparent_foreground)
+                fg_path = get_foreground_temp_image_folder(video_id).joinpath(base_path + ".png")
+                cv2.imwrite(str(fg_path), transparent_foreground)
+                del transparent_foreground
 
-                # Create background cut frames
+                # Create and write background cut frame immediately
                 transparent_background = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
                 transparent_background[:, :, 3] = ((masks.astype(np.uint8) + 1) % 2) * 255
-                background_paths.append(get_background_temp_image_folder(video_id).joinpath(base_path + ".png"))
-                background_frames.append(transparent_background)
+                bg_path = get_background_temp_image_folder(video_id).joinpath(base_path + ".png")
+                cv2.imwrite(str(bg_path), transparent_background)
+                del transparent_background
 
                 # Create masked frames
                 frame = mask_annotator.annotate(frame, detections)
                 sink.write_frame(frame)
-
-        write_images(foreground_paths, foreground_frames)
-        write_images(background_paths, background_frames)
+                del frame, masks
         (ffmpeg
          .input(temp_file.__str__())
          .output(
@@ -250,12 +245,21 @@ async def cut_video(video_id: str, start_time: float, end_time: float):
         if not original_video_path.exists():
             raise FileNotFoundError(f"Originalvideo {original_video_path.__str__()} wurde nicht gefunden.")
 
+        # Read FPS directly from the video file
+        probe = ffmpeg.probe(original_video_path.__str__(), cmd="ffprobe")
+        video_stream = next(s for s in probe["streams"] if s["codec_type"] == "video")
+        fps_string = video_stream["r_frame_rate"]
+        slash = fps_string.find("/")
+        local_fps = round(float(fps_string[0:slash]) / float(fps_string[slash + 1:]), 2)
+
         global fps
-        start_frame = int(start_time * fps)
-        end_frame = int(end_time * fps)
+        fps = local_fps
+
+        start_frame = int(start_time * local_fps)
+        end_frame = int(end_time * local_fps)
         print(f"Start Frame: {start_frame}")
         print(f"End Frame: {end_frame}")
-        print(f"FPS: {fps}")
+        print(f"FPS: {local_fps}")
 
         input_file = ffmpeg.input(original_video_path.__str__())
         ffmpeg.output(input_file.trim(start_frame=start_frame, end_frame=end_frame).setpts('PTS-STARTPTS'),

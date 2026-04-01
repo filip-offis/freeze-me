@@ -2,6 +2,7 @@ import io
 import os
 import traceback
 from pathlib import Path
+from typing import Any
 
 import cv2
 import supervision as sv
@@ -65,8 +66,25 @@ import shutil
 
 inference_state: {}
 fps = 0
-points = []
-labels = []
+segmentation_sessions: dict[str, dict[str, Any]] = {}
+
+
+def _get_segmentation_session(video_id: str) -> dict[str, Any]:
+    session = segmentation_sessions.get(video_id)
+    if session is None:
+        raise RuntimeError(
+            f"Segmentation state for video '{video_id}' is not initialized. "
+            f"Call initialize_segmentation first."
+        )
+    return session
+
+
+def _extract_masks(mask_logits):
+    mask_data = (mask_logits > 0.0).cpu().numpy()
+    n, x, h, w = mask_data.shape
+    masks = mask_data.reshape(n * x, h, w)
+    combined_mask = np.any(masks, axis=0) if masks.shape[0] > 0 else np.zeros((h, w), dtype=bool)
+    return masks, combined_mask
 
 
 async def save_video(file: UploadFile):
@@ -113,14 +131,13 @@ async def get_video_details(video_id):
 
 async def initialize_segmentation(video_id):
     try:
-        global inference_state, points, labels
         image_folder = get_images_path(video_id)
         total_frames = len(os.listdir(image_folder))
-        points = [[]] * total_frames
-        labels = [[]] * total_frames
-        print(points)
-        print(labels)
-        inference_state = predictor.init_state(video_path=image_folder.__str__())
+        segmentation_sessions[video_id] = {
+            "inference_state": predictor.init_state(video_path=image_folder.__str__()),
+            "points": [[] for _ in range(total_frames)],
+            "labels": [[] for _ in range(total_frames)],
+        }
     except Exception as e:
         print(e)
         print(e.__traceback__)
@@ -138,40 +155,50 @@ async def get_frame(video_id, frame_id):
 
 async def add_new_point_to_segmentation(video_id, point_x, point_y, point_type, frame_num):
     try:
-        global points, labels
-        points[frame_num].append([point_x, point_y])
-        labels[frame_num].append(point_type)
-        print(points, labels)
-        output_path = get_preview_mask_frames_folder_path(video_id)
-        with sv.ImageSink(target_dir_path=output_path.__str__()) as sink:
-            _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
-                inference_state=inference_state,
-                frame_idx=frame_num,
-                obj_id=1,
-                points=points[frame_num],
-                labels=labels[frame_num],
-            )
-            mask_data = (out_mask_logits > 0.0).cpu().numpy()
-            n, x, h, w = mask_data.shape
-            masks = mask_data.reshape(n * x, h, w)
-            detections = sv.Detections(
-                xyxy=sv.mask_to_xyxy(masks=masks),
-                mask=masks,
-                tracker_id=np.array(out_obj_ids)
-            )
-            frame_path = get_frame_path(video_id, frame_num)
-            frame = cv2.imread(frame_path.__str__())
-            frame = mask_annotator.annotate(frame, detections)
-            sink.save_image(frame, get_preview_mask_frame_name(video_id, len(points)))
-        return get_preview_mask_frame_name(video_id, len(points))
+        session = _get_segmentation_session(video_id)
+        frame_num = int(frame_num)
+        if frame_num < 0 or frame_num >= len(session["points"]):
+            raise IndexError(f"Frame index {frame_num} is out of range for video '{video_id}'.")
+
+        session["points"][frame_num].append([float(point_x), float(point_y)])
+        session["labels"][frame_num].append(int(point_type))
+
+        _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
+            inference_state=session["inference_state"],
+            frame_idx=frame_num,
+            obj_id=1,
+            points=np.array(session["points"][frame_num], dtype=np.float32),
+            labels=np.array(session["labels"][frame_num], dtype=np.int32),
+        )
+
+        masks, _ = _extract_masks(out_mask_logits)
+        detections = sv.Detections(
+            xyxy=sv.mask_to_xyxy(masks=masks),
+            mask=masks,
+            tracker_id=np.array(out_obj_ids)
+        )
+
+        frame_path = get_frame_path(video_id, frame_num)
+        frame = cv2.imread(frame_path.__str__())
+        if frame is None:
+            raise FileNotFoundError(f"Could not load frame {frame_path}.")
+
+        frame = mask_annotator.annotate(frame, detections)
+        preview_path = get_preview_mask_frame_name(video_id, frame_num)
+        if not cv2.imwrite(preview_path.__str__(), frame):
+            raise IOError(f"Failed to write preview mask frame to {preview_path}.")
+
+        return preview_path
     except Exception as e:
         print(e)
         print(e.__traceback__)
         print(traceback.format_exc())
+        raise
 
 
 async def get_masked_video(video_id):
     try:
+        session = _get_segmentation_session(video_id)
         output_path = get_masked_video_path(video_id)
         image_path = get_images_path(video_id)
         video_path = get_upload_path(video_id)
@@ -180,12 +207,13 @@ async def get_masked_video(video_id):
         # run propagation throughout the video and collect the results in a dict
         temp_file = get_temp_file_path(video_id)
         with sv.VideoSink(temp_file.__str__(), video_info=video_info) as sink:
-            for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state,
+            for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(session["inference_state"],
                                                                                             start_frame_idx=0):
                 frame = cv2.imread(str(frames_paths[out_frame_idx]))
-                masks = (out_mask_logits > 0.0).cpu().numpy()
-                n, x, h, w = masks.shape
-                masks = masks.reshape(n * x, h, w)
+                if frame is None:
+                    raise FileNotFoundError(f"Could not load frame {frames_paths[out_frame_idx]}.")
+
+                masks, combined_mask = _extract_masks(out_mask_logits)
                 detections = sv.Detections(
                     xyxy=sv.mask_to_xyxy(masks=masks),
                     mask=masks,
@@ -195,14 +223,15 @@ async def get_masked_video(video_id):
 
                 # Create and write foreground cut frame immediately
                 transparent_foreground = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
-                transparent_foreground[:, :, 3] = masks.astype(np.uint8) * 255
+                alpha_mask = combined_mask.astype(np.uint8) * 255
+                transparent_foreground[:, :, 3] = alpha_mask
                 fg_path = get_foreground_temp_image_folder(video_id).joinpath(base_path + ".png")
                 cv2.imwrite(str(fg_path), transparent_foreground)
                 del transparent_foreground
 
                 # Create and write background cut frame immediately
                 transparent_background = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
-                transparent_background[:, :, 3] = ((masks.astype(np.uint8) + 1) % 2) * 255
+                transparent_background[:, :, 3] = np.where(combined_mask, 0, 255).astype(np.uint8)
                 bg_path = get_background_temp_image_folder(video_id).joinpath(base_path + ".png")
                 cv2.imwrite(str(bg_path), transparent_background)
                 del transparent_background
@@ -228,6 +257,7 @@ async def get_masked_video(video_id):
         print(e)
         print(e.__traceback__)
         print(traceback.format_exc())
+        raise
 
 
 async def cut_video(video_id: str, start_time: float, end_time: float):

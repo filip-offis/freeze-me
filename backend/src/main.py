@@ -165,7 +165,9 @@ async def get_first_frame_of_video(video_id: str):
 async def add_point_to_video(video_id: Annotated[str, Form()], point_x: Annotated[float, Form()], point_y: Annotated[float, Form()], point_type: Annotated[int, Form()], frame_num: Annotated[int, Form()]):
     try:
         masked_frame = await add_new_point_to_segmentation(video_id, point_x, point_y, point_type, frame_num)
-        return FileResponse(masked_frame, media_type="image/png")
+        if not masked_frame or not os.path.exists(masked_frame):
+            raise FileNotFoundError(f"Segmentation preview frame was not created for video {video_id}.")
+        return FileResponse(str(masked_frame), media_type="image/png")
     except Exception as e:
         return JSONResponse(
             status_code=500,
@@ -178,7 +180,9 @@ async def get_segmentation_result(video_id):
         masked_video = await get_masked_video(video_id)
         set_current_step(video_id, Step.BACKGROUND)
         set_current_step(video_id, Step.MAIN_EFFECT)
-        return FileResponse(masked_video, media_type="video/mp4")
+        if not masked_video or not os.path.exists(masked_video):
+            raise FileNotFoundError(f"Masked video was not created for video {video_id}.")
+        return FileResponse(str(masked_video), media_type="video/mp4")
     except Exception as e:
         return JSONResponse(
             status_code=500,

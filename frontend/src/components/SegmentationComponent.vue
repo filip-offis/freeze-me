@@ -66,22 +66,23 @@ const handleImageClick = (event) => {
 
   dotX.value = Math.floor(event.layerX - dotSize.value/2) + "px"
   dotY.value = Math.floor(event.layerY - dotSize.value/2) + "px"
-  selectedY.value = estimatedY
-  selectedX.value = estimatedX
+  selectedY.value = estimatedY.value
+  selectedX.value = estimatedX.value
   console.log("X: ", calcX, "Y: ", calcY)
 }
 
-const loadFrame = async (value) => {
+const loadFrame = async (value = frameNum.value) => {
   if (cachedFrame[value] != null) {
     displayedFrame.value = cachedFrame[value];
     return
   }
-  const first_frame = await axios.get(`${store.apiUrl}/get-frame?video_id=` + videoId.value + '&frame_num=' + (frameNum.value), {
+  const first_frame = await axios.get(`${store.apiUrl}/get-frame?video_id=` + videoId.value + '&frame_num=' + value, {
     responseType: 'blob'
   });
-  displayedFrame.value = URL.createObjectURL(first_frame.data);
-  cachedFrame[value] = displayedFrame.value
-  store.segmentedFrame = displayedFrame.value;
+  const frameUrl = URL.createObjectURL(first_frame.data);
+  displayedFrame.value = frameUrl;
+  cachedFrame[value] = frameUrl
+  store.segmentedFrame = frameUrl;
 }
 
 const handleDotSubmit = async () => {
@@ -102,8 +103,10 @@ const handleDotSubmit = async () => {
     });
     console.log(frame_response)
     console.log(frame_response.data)
-    displayedFrame.value = URL.createObjectURL(frame_response.data);
-    store.segmentedFrame = displayedFrame.value
+    const previewUrl = URL.createObjectURL(frame_response.data);
+    displayedFrame.value = previewUrl;
+    cachedFrame[frameNum.value] = previewUrl;
+    store.segmentedFrame = previewUrl
     maskedImage.value = true;
   } catch (e) {
     console.error(e)
@@ -151,7 +154,13 @@ const moveToSegmentationResult = async () => {
     <div v-if="!segmentedVideo" class="frame-wrapper">
       <div class="wrapper">
         <img v-if="displayedFrame" :src="displayedFrame" @click.stop="handleImageClick" class="segmentation-image" ismap/>
-        <img v-if="selectedX && selectedY" :src="pointType === 'Additive' ? posDot : negDot" class="select-dot" :width="dotSize" :height="dotSize"/>
+        <img
+          v-if="selectedX !== null && selectedY !== null"
+          :src="pointType === 'Additive' ? posDot : negDot"
+          class="select-dot"
+          :width="dotSize"
+          :height="dotSize"
+        />
       </div>
       <div v-if="!segmentedVideo" class="controls">
         <v-slider
@@ -166,7 +175,7 @@ const moveToSegmentationResult = async () => {
           @update:modelValue="loadFrame"
         ></v-slider>
         <v-switch v-model="pointType" :label="`PointType: ${pointType}`" false-value="Subtractive" true-value="Additive" class="point-selection" hide-details />
-        <v-btn class="submit-button" :disabled="!selectedX && !selectedY" @click="handleDotSubmit">
+        <v-btn class="submit-button" :disabled="selectedX === null || selectedY === null" @click="handleDotSubmit">
           Set Point
         </v-btn>
         <v-btn class="submit-button" :disabled="!maskedImage" @click="moveToSegmentationResult">

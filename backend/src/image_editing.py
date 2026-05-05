@@ -23,12 +23,12 @@ except ImportError:
     ndimage = None
     HAS_CUPY = False
 
-from path_manager import get_background_image, get_background_temp_image_path
-from path_manager import get_background_temp_image_folder
-from path_manager import get_foreground_temp_image_folder
-from path_manager import get_motion_blur_folder
-from path_manager import get_motion_blur_image
-from project_data import set_motion_blur_metadata, get_motion_blur_data, get_background_type, BackgroundType
+from .path_manager import get_background_image, get_background_temp_image_path
+from .path_manager import get_background_temp_image_folder
+from .path_manager import get_foreground_temp_image_folder
+from .path_manager import get_motion_blur_folder
+from .path_manager import get_motion_blur_image
+from .project_data import set_motion_blur_metadata, get_motion_blur_data, get_background_type, BackgroundType
 
 max_kernel_size = 60
 min_movement = 1
@@ -39,7 +39,7 @@ kernel_list = np.zeros((max_movement, np.floor(180 / angle_range).astype(int)), 
 kernel_list[:, :] = None
 
 def get_device():
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    return "cuda" if torch.cuda.is_available() and HAS_CUPY else "cpu"
 
 
 async def save_background(file: UploadFile, video_id):

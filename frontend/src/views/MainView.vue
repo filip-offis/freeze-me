@@ -36,7 +36,7 @@ onMounted(() => {
   currentIndex.value += store.steps.afterEffect
 })
 
-watch(store.selectedVideoId, () => {
+watch(() => store.selectedVideoId, () => {
   console.log("Found change in id")
   if (store.selectedVideoId == null) {
     console.log("go to upload")

@@ -2,14 +2,14 @@
 import { reactive } from 'vue';
 
 const buildApiUrl = () => {
-    const basePath = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
-    return `${basePath}/backend`;
+    const configuredApiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    return configuredApiUrl.replace(/\/$/, '');
 };
 
 // Define a reactive store to manage global state across the app
 export const store = reactive({
     videoUrls: [], // Stores the URLs of the fetched unblurred photos
-    apiUrl: buildApiUrl(), // Base URL for API requests proxied by Nginx/reverse proxy
+    apiUrl: buildApiUrl(), // Base URL for the local backend API
     selectedVideo: null, // Stores the selected image
     selectedVideoId: null,
     segmentedFrame: null,

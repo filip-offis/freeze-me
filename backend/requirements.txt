@@ -7,10 +7,6 @@ static-ffmpeg
 opencv-python
 torch
 torchvision
-matplotlib
 numpy
 sam2
 supervision
-uuid
-cupy-cuda12x
-scipy

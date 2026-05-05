@@ -1,5 +1,7 @@
-from pathlib import Path
 import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 FOLDER_PATH = "videos"
 IMAGE_PATH = "images"
@@ -29,10 +31,7 @@ def get_config_path():
             config_name = "sam2.1_hiera_s.yaml"
 
     # Try local config file first (works with SAM2 installed from source)
-    prefix_path = Path.cwd()
-    if prefix_path.parent.__eq__("backend"):
-        prefix_path = prefix_path.parent
-    local_path = prefix_path.joinpath(CONFIG_PATH).joinpath(config_name)
+    local_path = BASE_DIR.joinpath(CONFIG_PATH).joinpath(config_name)
     if local_path.exists():
         return local_path.absolute().as_posix()
 
@@ -40,23 +39,16 @@ def get_config_path():
     return f"configs/sam2.1/{config_name}"
 
 def get_checkpoint_path():
-    path = os.environ.get("SAM_VERSION").__str__().lower()
-    if path is None:
-        print("SAM_VERSION environment variable is not set")
-        print("Possible values are: large, b_plus, small, tiny")
-        print("Defaulting to small")
-    prefix_path = Path.cwd()
-    if prefix_path.parent.__eq__("backend"):
-        prefix_path = prefix_path.parent
-    match path:
+    version = (os.environ.get("SAM_VERSION") or "small").lower()
+    match version:
         case "large":
-            path = prefix_path.joinpath(CHECKPOINT_PATH).joinpath("sam2.1_hiera_large.pt").absolute()
+            path = BASE_DIR.joinpath(CHECKPOINT_PATH).joinpath("sam2.1_hiera_large.pt").absolute()
         case "b_plus":
-            path = prefix_path.joinpath(CHECKPOINT_PATH).joinpath("sam2.1_hiera_base_plus.pt").absolute()
+            path = BASE_DIR.joinpath(CHECKPOINT_PATH).joinpath("sam2.1_hiera_base_plus.pt").absolute()
         case "tiny":
-            path = prefix_path.joinpath(CHECKPOINT_PATH).joinpath("sam2.1_hiera_tiny.pt").absolute()
+            path = BASE_DIR.joinpath(CHECKPOINT_PATH).joinpath("sam2.1_hiera_tiny.pt").absolute()
         case _:
-            path = prefix_path.joinpath(CHECKPOINT_PATH).joinpath("sam2.1_hiera_small.pt").absolute()
+            path = BASE_DIR.joinpath(CHECKPOINT_PATH).joinpath("sam2.1_hiera_small.pt").absolute()
     return path.as_posix()
 
 import shutil
@@ -79,7 +71,7 @@ def delete_project(video_id):
 
 
 def get_main_folder():
-    return Path.cwd().joinpath(FOLDER_PATH)
+    return BASE_DIR.joinpath(FOLDER_PATH)
 
 def get_video_folder_path(video_id):
     return get_main_folder().joinpath(Path(video_id).stem)
@@ -137,7 +129,7 @@ def get_background_temp_image_path(video_id, frame_id):
 
 
 def create_all_paths(video_id):
-    Path.cwd().joinpath(FOLDER_PATH).mkdir(parents=True, exist_ok=True)
+    get_main_folder().mkdir(parents=True, exist_ok=True)
     get_video_folder_path(video_id).mkdir(parents=True, exist_ok=True)
     get_images_path(video_id).mkdir(parents=True, exist_ok=True)
     get_foreground_temp_image_folder(video_id).mkdir(parents=True, exist_ok=True)

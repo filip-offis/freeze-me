@@ -67,9 +67,14 @@ const updateVideoDetails = async () => {
     }
     if (videoStream) {
       duration.value = Math.round(videoStream.duration * 100) / 100;
-      const fpsString = videoStream.r_frame_rate;
-      const slashIndex = fpsString.lastIndexOf("/");
-      framerate.value = Math.round((Number(fpsString.substring(0, slashIndex)) / Number(fpsString.substring(slashIndex + 1))) * 100) / 100;
+      const backendProcessingFps = information.processing_fps;
+      if (backendProcessingFps) {
+        framerate.value = Math.round(backendProcessingFps * 100) / 100;
+      } else {
+        const fpsString = videoStream.r_frame_rate;
+        const slashIndex = fpsString.lastIndexOf("/");
+        framerate.value = Math.round((Number(fpsString.substring(0, slashIndex)) / Number(fpsString.substring(slashIndex + 1))) * 100) / 100;
+      }
       height.value = videoStream.height;
       width.value = videoStream.width;
       bitrate.value = videoStream.bit_rate;

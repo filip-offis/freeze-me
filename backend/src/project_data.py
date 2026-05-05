@@ -3,8 +3,8 @@ import os
 from enum import Enum
 from pathlib import Path
 
-from path_manager import get_main_folder
-from path_manager import get_workflow_data_path
+from .path_manager import get_main_folder
+from .path_manager import get_workflow_data_path
 
 # saved data keys
 CURRENT_STEP = "current_step"
@@ -40,9 +40,9 @@ def create_project(video_id):
 
 def get_all_projects():
     path = get_main_folder()
-    video_ids = os.listdir(path.__str__())
-    print(video_ids)
-    return video_ids
+    if not path.exists():
+        return []
+    return os.listdir(path.__str__())
 
 
 def set_current_step(video_id, step: Step):
@@ -80,15 +80,13 @@ def get_motion_blur_data(video_id):
 def load_data(video_id):
     path = get_workflow_data_path(video_id)
     if Path(path).exists() and Path(path).is_file():
-        f = open(path, "r")
-        return json.load(f)
-    else:
-        raise Exception(f"Could not load data from: {path}")
+        with open(path, "r", encoding="utf-8") as file:
+            return json.load(file)
+    raise Exception(f"Could not load data from: {path}")
 
 
 def save_data(video_id, data):
     path = get_workflow_data_path(video_id)
-    if not Path(path).exists():
-        Path(path).touch()
-    f = open(path, "w")
-    f.write(json.dumps(data))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(json.dumps(data))

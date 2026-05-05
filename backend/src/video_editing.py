@@ -1,59 +1,49 @@
 import io
 import os
 import traceback
+import uuid
 from pathlib import Path
 from typing import Any
 
 import cv2
 import supervision as sv
-from sam2.sam2_video_predictor import SAM2VideoPredictor
-
-from image_editing import read_images
-from path_manager import create_all_paths
 
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 import torch
 import torchvision
-import uuid
 import numpy as np
 from sam2.build_sam import build_sam2_video_predictor
+from sam2.sam2_video_predictor import SAM2VideoPredictor
 
-from path_manager import get_video_folder_path
-from path_manager import get_background_temp_image_folder
-from path_manager import get_foreground_temp_image_folder
-from path_manager import get_images_path
-from path_manager import get_upload_path
-from path_manager import get_checkpoint_path
-from path_manager import get_config_path
-from path_manager import get_temp_file_path
-from path_manager import get_frame_path
-from path_manager import get_masked_video_path
-from path_manager import get_preview_mask_frames_folder_path
-from path_manager import get_preview_mask_frame_name
+from .path_manager import create_all_paths
+from .path_manager import get_video_folder_path
+from .path_manager import get_background_temp_image_folder
+from .path_manager import get_foreground_temp_image_folder
+from .path_manager import get_images_path
+from .path_manager import get_upload_path
+from .path_manager import get_checkpoint_path
+from .path_manager import get_config_path
+from .path_manager import get_temp_file_path
+from .path_manager import get_frame_path
+from .path_manager import get_masked_video_path
+from .path_manager import get_preview_mask_frame_name
 
-from image_editing import write_images
+MAX_PROCESSING_FPS = float(os.environ.get("FREEZE_ME_MAX_FPS", "30"))
+SAM_DEVICE = os.environ.get("SAM_DEVICE", "auto").lower()
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-print("PyTorch version:", torch.__version__)
-print("Torchvision version:", torchvision.__version__)
-print("CUDA available:", torch.cuda.is_available())
-print("CUDA Version:", torch.version.cuda)
-print("CuDNN Version:", torch.backends.cudnn.version())
-print(torch.__version__)
-print(torch.backends.mkl.is_available())
-print(f"Using checkpoint: {get_checkpoint_path()}")
-print(f"Using config: {get_config_path()}")
-print(f"Using device: {device}")
-print("FlashAttention available:", torch.backends.cuda.flash_sdp_enabled())
+def _resolve_device() -> torch.device:
+    if SAM_DEVICE == "cpu":
+        return torch.device("cpu")
+    if SAM_DEVICE == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("SAM_DEVICE is set to 'cuda', but CUDA is not available.")
+        return torch.device("cuda")
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-if device.type == "cuda":
-    torch.autocast("cuda", dtype=torch.bfloat16).__enter__()
-    if torch.cuda.get_device_properties(0).major >= 8:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
 
-predictor: SAM2VideoPredictor = build_sam2_video_predictor(get_config_path(), get_checkpoint_path(), device=device)
+device = _resolve_device()
+predictor: SAM2VideoPredictor | None = None
 
 colors = ['#FF1493', '#00BFFF', '#FF6347', '#FFD700']
 mask_annotator = sv.MaskAnnotator(
@@ -69,6 +59,138 @@ fps = 0
 segmentation_sessions: dict[str, dict[str, Any]] = {}
 
 
+def _patch_predictor_dtype_handling(predictor_instance: SAM2VideoPredictor) -> None:
+    original_run_single_frame_inference = predictor_instance._run_single_frame_inference
+    original_run_memory_encoder = predictor_instance._run_memory_encoder
+
+    def run_single_frame_inference_fp32(*args, **kwargs):
+        compact_current_out, pred_masks_gpu = original_run_single_frame_inference(*args, **kwargs)
+        maskmem_features = compact_current_out.get("maskmem_features")
+        if isinstance(maskmem_features, torch.Tensor) and maskmem_features.dtype != torch.float32:
+            compact_current_out["maskmem_features"] = maskmem_features.to(torch.float32)
+        return compact_current_out, pred_masks_gpu
+
+    def run_memory_encoder_fp32(*args, **kwargs):
+        maskmem_features, maskmem_pos_enc = original_run_memory_encoder(*args, **kwargs)
+        if isinstance(maskmem_features, torch.Tensor) and maskmem_features.dtype != torch.float32:
+            maskmem_features = maskmem_features.to(torch.float32)
+        return maskmem_features, maskmem_pos_enc
+
+    predictor_instance._run_single_frame_inference = run_single_frame_inference_fp32
+    predictor_instance._run_memory_encoder = run_memory_encoder_fp32
+
+
+def _parse_fps(fps_string: str) -> float:
+    numerator, denominator = fps_string.split("/")
+    denominator_value = float(denominator)
+    if denominator_value == 0:
+        return 0.0
+    return round(float(numerator) / denominator_value, 2)
+
+
+def _probe_video(video_path: Path) -> tuple[dict[str, Any], dict[str, Any], float]:
+    details = ffmpeg.probe(video_path.as_posix(), cmd="ffprobe")
+    video_stream = next(stream for stream in details["streams"] if stream["codec_type"] == "video")
+    source_fps = _parse_fps(video_stream["r_frame_rate"])
+    return details, video_stream, source_fps
+
+
+def _get_processing_fps(source_fps: float) -> float:
+    if MAX_PROCESSING_FPS <= 0:
+        return source_fps
+    if source_fps <= 0:
+        return MAX_PROCESSING_FPS
+    return min(source_fps, MAX_PROCESSING_FPS)
+
+
+def _remove_matching_files(folder: Path, pattern: str) -> None:
+    if not folder.exists():
+        return
+    for file_path in folder.glob(pattern):
+        if file_path.is_file():
+            file_path.unlink(missing_ok=True)
+
+
+def _extract_video_frames(video_path: Path, image_folder: Path, processing_fps: float, source_fps: float) -> None:
+    image_folder.mkdir(parents=True, exist_ok=True)
+    _remove_matching_files(image_folder, "*.jpeg")
+
+    stream = ffmpeg.input(video_path.as_posix())
+    if source_fps > processing_fps + 0.01:
+        stream = stream.filter("fps", fps=processing_fps)
+
+    (
+        stream.output(image_folder.joinpath("%05d.jpeg").as_posix(), start_number=0, **{"q:v": "2"})
+        .overwrite_output()
+        .run(quiet=True)
+    )
+
+
+def clear_segmentation_session(video_id: str) -> None:
+    segmentation_sessions.pop(video_id, None)
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
+
+def _clear_generated_artifacts(video_id: str) -> None:
+    image_folder = get_images_path(video_id)
+    preview_folder = get_preview_mask_frame_name(video_id, 0).parent
+    foreground_folder = get_foreground_temp_image_folder(video_id)
+    background_folder = get_background_temp_image_folder(video_id)
+
+    for folder, pattern in (
+        (image_folder, "*.jpeg"),
+        (preview_folder, "*.png"),
+        (foreground_folder, "*.png"),
+        (background_folder, "*.png"),
+    ):
+        _remove_matching_files(folder, pattern)
+
+    for file_path in (
+        get_masked_video_path(video_id),
+        get_temp_file_path(video_id),
+    ):
+        file_path.unlink(missing_ok=True)
+
+
+def get_predictor() -> SAM2VideoPredictor:
+    global predictor
+
+    if predictor is not None:
+        return predictor
+
+    checkpoint_path = Path(get_checkpoint_path())
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(
+            f"SAM2 checkpoint not found at {checkpoint_path}. "
+            "Run `python download_checkpoint.py` in the backend folder first."
+        )
+
+    print("PyTorch version:", torch.__version__)
+    print("Torchvision version:", torchvision.__version__)
+    print("CUDA available:", torch.cuda.is_available())
+    print("Using checkpoint:", checkpoint_path)
+    print("Using config:", get_config_path())
+    print("Using device:", device)
+
+    if device.type == "cuda":
+        # Do not force a global autocast context for SAM2.
+        # On some local CUDA setups this mixes BF16 activations with FP32 weights
+        # and crashes during propagation with dtype mismatch errors.
+        torch.backends.cudnn.benchmark = True
+        if torch.cuda.get_device_properties(0).major >= 8:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+
+    predictor = build_sam2_video_predictor(
+        get_config_path(),
+        checkpoint_path.as_posix(),
+        device=device,
+    )
+    _patch_predictor_dtype_handling(predictor)
+    return predictor
+
+
 def _get_segmentation_session(video_id: str) -> dict[str, Any]:
     session = segmentation_sessions.get(video_id)
     if session is None:
@@ -77,6 +199,28 @@ def _get_segmentation_session(video_id: str) -> dict[str, Any]:
             f"Call initialize_segmentation first."
         )
     return session
+
+
+def _normalize_tensor_dtypes(value):
+    if isinstance(value, torch.Tensor) and value.is_floating_point() and value.dtype != torch.float32:
+        return value.to(torch.float32)
+    if isinstance(value, dict):
+        return {key: _normalize_tensor_dtypes(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize_tensor_dtypes(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_normalize_tensor_dtypes(item) for item in value)
+    return value
+
+
+def _normalize_inference_state(session: dict[str, Any]) -> None:
+    inference_state = session.get("inference_state")
+    if inference_state is None:
+        return
+
+    for key in ("output_dict_per_obj", "temp_output_dict_per_obj", "cached_features", "constants"):
+        if key in inference_state:
+            inference_state[key] = _normalize_tensor_dtypes(inference_state[key])
 
 
 def _extract_masks(mask_logits):
@@ -95,9 +239,10 @@ async def save_video(file: UploadFile):
     with open(path, "wb") as f:
         f.write(video_data.getbuffer())
 
+    _, _, source_fps = _probe_video(path)
+    processing_fps = _get_processing_fps(source_fps)
     image_folder = get_images_path(video_id)
-    ffmpeg.input(path).output(image_folder.__str__() + "/%05d.jpeg", start_number=0,
-                              **{'q:v': '2'}).overwrite_output().run(quiet=True)
+    _extract_video_frames(path, image_folder, processing_fps, source_fps)
 
     return video_id
 
@@ -106,18 +251,13 @@ async def get_video_details(video_id):
     try:
         path = get_upload_path(video_id)
         image_folder = get_images_path(video_id)
-        details = ffmpeg.probe(path.__str__(), cmd="ffprobe")
-        video_stream = None
-        for stream in details["streams"]:
-            if stream["codec_type"] == "video":
-                video_stream = stream
-                break
+        details, _, source_fps = _probe_video(path)
         global fps
         total_frames = len(os.listdir(image_folder))
         details["total_frames"] = total_frames
-        fps_string = video_stream["r_frame_rate"]
-        slash = fps_string.find("/")
-        fps = round(float(fps_string[0:slash]) / float(fps_string[slash + 1:]), 2)
+        details["processing_fps"] = _get_processing_fps(source_fps)
+        details["source_fps"] = source_fps
+        fps = details["processing_fps"]
         print("FPS: ", fps)
         print("Total frames: ", total_frames)
         return details
@@ -133,11 +273,20 @@ async def initialize_segmentation(video_id):
     try:
         image_folder = get_images_path(video_id)
         total_frames = len(os.listdir(image_folder))
+        predictor_instance = get_predictor()
+        _, _, source_fps = _probe_video(get_upload_path(video_id))
         segmentation_sessions[video_id] = {
-            "inference_state": predictor.init_state(video_path=image_folder.__str__()),
+            "inference_state": predictor_instance.init_state(
+                video_path=image_folder.__str__(),
+                offload_video_to_cpu=False,
+                offload_state_to_cpu=False,
+                async_loading_frames=False,
+            ),
+            "processing_fps": _get_processing_fps(source_fps),
             "points": [[] for _ in range(total_frames)],
             "labels": [[] for _ in range(total_frames)],
         }
+        _normalize_inference_state(segmentation_sessions[video_id])
     except Exception as e:
         print(e)
         print(e.__traceback__)
@@ -155,6 +304,7 @@ async def get_frame(video_id, frame_id):
 
 async def add_new_point_to_segmentation(video_id, point_x, point_y, point_type, frame_num):
     try:
+        predictor_instance = get_predictor()
         session = _get_segmentation_session(video_id)
         frame_num = int(frame_num)
         if frame_num < 0 or frame_num >= len(session["points"]):
@@ -163,13 +313,14 @@ async def add_new_point_to_segmentation(video_id, point_x, point_y, point_type, 
         session["points"][frame_num].append([float(point_x), float(point_y)])
         session["labels"][frame_num].append(int(point_type))
 
-        _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
+        _, out_obj_ids, out_mask_logits = predictor_instance.add_new_points_or_box(
             inference_state=session["inference_state"],
             frame_idx=frame_num,
             obj_id=1,
             points=np.array(session["points"][frame_num], dtype=np.float32),
             labels=np.array(session["labels"][frame_num], dtype=np.int32),
         )
+        _normalize_inference_state(session)
 
         masks, _ = _extract_masks(out_mask_logits)
         detections = sv.Detections(
@@ -198,17 +349,27 @@ async def add_new_point_to_segmentation(video_id, point_x, point_y, point_type, 
 
 async def get_masked_video(video_id):
     try:
+        predictor_instance = get_predictor()
         session = _get_segmentation_session(video_id)
+        _normalize_inference_state(session)
         output_path = get_masked_video_path(video_id)
         image_path = get_images_path(video_id)
         video_path = get_upload_path(video_id)
-        video_info = sv.VideoInfo.from_video_path(video_path.__str__())
+        source_video_info = sv.VideoInfo.from_video_path(video_path.__str__())
         frames_paths = sorted(sv.list_files_with_extensions(directory=image_path.__str__(), extensions=["jpeg"]))
+        video_info = sv.VideoInfo(
+            width=source_video_info.width,
+            height=source_video_info.height,
+            fps=session.get("processing_fps", source_video_info.fps),
+            total_frames=len(frames_paths),
+        )
         # run propagation throughout the video and collect the results in a dict
         temp_file = get_temp_file_path(video_id)
         with sv.VideoSink(temp_file.__str__(), video_info=video_info) as sink:
-            for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(session["inference_state"],
-                                                                                            start_frame_idx=0):
+            for out_frame_idx, out_obj_ids, out_mask_logits in predictor_instance.propagate_in_video(
+                session["inference_state"],
+                start_frame_idx=0,
+            ):
                 frame = cv2.imread(str(frames_paths[out_frame_idx]))
                 if frame is None:
                     raise FileNotFoundError(f"Could not load frame {frames_paths[out_frame_idx]}.")
@@ -275,26 +436,24 @@ async def cut_video(video_id: str, start_time: float, end_time: float):
         if not original_video_path.exists():
             raise FileNotFoundError(f"Originalvideo {original_video_path.__str__()} wurde nicht gefunden.")
 
-        # Read FPS directly from the video file
-        probe = ffmpeg.probe(original_video_path.__str__(), cmd="ffprobe")
-        video_stream = next(s for s in probe["streams"] if s["codec_type"] == "video")
-        fps_string = video_stream["r_frame_rate"]
-        slash = fps_string.find("/")
-        local_fps = round(float(fps_string[0:slash]) / float(fps_string[slash + 1:]), 2)
+        _, _, source_fps = _probe_video(original_video_path)
+        processing_fps = _get_processing_fps(source_fps)
 
         global fps
-        fps = local_fps
-
-        start_frame = int(start_time * local_fps)
-        end_frame = int(end_time * local_fps)
-        print(f"Start Frame: {start_frame}")
-        print(f"End Frame: {end_frame}")
-        print(f"FPS: {local_fps}")
+        fps = processing_fps
+        print(f"Start Time: {start_time}")
+        print(f"End Time: {end_time}")
+        print(f"Source FPS: {source_fps}")
+        print(f"Processing FPS: {processing_fps}")
 
         input_file = ffmpeg.input(original_video_path.__str__())
-        ffmpeg.output(input_file.trim(start_frame=start_frame, end_frame=end_frame).setpts('PTS-STARTPTS'),
-                      temp_video_path.__str__(), vcodec='libx264', movflags='faststart',
-                      an=None).overwrite_output().run(quiet=True)
+        ffmpeg.output(
+            input_file.trim(start=start_time, end=end_time).setpts('PTS-STARTPTS'),
+            temp_video_path.__str__(),
+            vcodec='libx264',
+            movflags='faststart',
+            an=None
+        ).overwrite_output().run(quiet=True)
 
         # Überprüfen, ob die temporäre Datei erfolgreich erstellt wurde
         if temp_video_path.exists():
@@ -303,11 +462,10 @@ async def cut_video(video_id: str, start_time: float, end_time: float):
             temp_video_path.unlink()  # Temporäre Datei löschen
         else:
             raise Exception(f"Das temporäre Video {temp_video_path} wurde nicht erfolgreich erstellt.")
+        clear_segmentation_session(video_id)
+        _clear_generated_artifacts(video_id)
         image_folder = get_images_path(video_id)
-        for f in os.listdir(image_folder):
-            os.remove(os.path.join(image_folder, f))
-        ffmpeg.input(original_video_path).output(image_folder.__str__() + "/%05d.jpeg", start_number=0,
-                                                 **{'q:v': '2'}).overwrite_output().run(quiet=True)
+        _extract_video_frames(original_video_path, image_folder, processing_fps, source_fps)
         return new_video_file_name
 
     except Exception as e:

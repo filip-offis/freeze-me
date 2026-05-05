@@ -25,10 +25,13 @@ coverage
 *.sw?
 
 *.tsbuildinfo
+frontend/.env.local
 
 # Python 
 *.pyc
 *cpython-310.pyc
+.venv/
+backend/.venv/
 
 # Other
 *.mp4
@@ -37,7 +40,7 @@ coverage
 /notebook/files/sample_frames/*.jpeg
 /notebook/files/temp/*.jpeg
 !/notebook/files/sample_video.mp4
-/backend/src/checkpoints
-/backend/src/configs
+/backend/checkpoints
+/backend/configs
 /backend/notebook/.ipynb_checkpoints
-/backend/src/videos
+/backend/videos

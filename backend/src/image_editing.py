@@ -510,6 +510,8 @@ def get_magnitude_cpu(delta, roi):
 def get_max_min_center_of_object_gpu(frame):
     alpha_channel = frame[..., 3]
     visible_pixels = cupy.argwhere(alpha_channel > 0)
+    if visible_pixels.size == 0:
+        return 0, 0, 0, 0, 0, 0
     min_y, min_x = cupy.min(visible_pixels, axis=0).get()
     max_y, max_x = cupy.max(visible_pixels, axis=0).get()
     center_x = ((max_x + min_x) / 2).item()
@@ -520,6 +522,8 @@ def get_max_min_center_of_object_gpu(frame):
 def get_max_min_center_of_object(frame):
     alpha_channel = frame[..., 3]
     visible_pixels = np.argwhere(alpha_channel > 0)
+    if visible_pixels.size == 0:
+        return 0, 0, 0, 0, 0, 0
     min_y, min_x = np.min(visible_pixels, axis=0)
     max_y, max_x = np.max(visible_pixels, axis=0)
     center_x = (max_x + min_x) / 2

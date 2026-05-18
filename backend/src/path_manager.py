@@ -1,10 +1,15 @@
 import os
 from pathlib import Path
 
+from .env_config import load_env_file
+
+load_env_file()
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 FOLDER_PATH = "videos"
 IMAGE_PATH = "images"
+SOURCE_IMAGE_PATH = "source_images"
 MASK_PREVIEW_NAME = "mask.png"
 MASK_PREVIEW_FOLDER = "mask_previews"
 MASKED_VIDEO_NAME = "masked.mp4"
@@ -100,8 +105,14 @@ def get_multiple_instances_image(video_id, image_name):
 def get_images_path(video_id):
     return get_video_folder_path(video_id).joinpath(IMAGE_PATH)
 
+def get_source_images_path(video_id):
+    return get_video_folder_path(video_id).joinpath(SOURCE_IMAGE_PATH)
+
 def get_frame_path(video_id, frame_id):
     return get_images_path(video_id).joinpath(str(frame_id).zfill(5) + ".jpeg")
+
+def get_source_frame_path(video_id, frame_id):
+    return get_source_images_path(video_id).joinpath(str(frame_id).zfill(5) + ".jpeg")
 
 def get_preview_mask_frames_folder_path(video_id):
     return get_video_folder_path(video_id).joinpath(MASK_PREVIEW_FOLDER)
@@ -132,6 +143,7 @@ def create_all_paths(video_id):
     get_main_folder().mkdir(parents=True, exist_ok=True)
     get_video_folder_path(video_id).mkdir(parents=True, exist_ok=True)
     get_images_path(video_id).mkdir(parents=True, exist_ok=True)
+    get_source_images_path(video_id).mkdir(parents=True, exist_ok=True)
     get_foreground_temp_image_folder(video_id).mkdir(parents=True, exist_ok=True)
     get_background_temp_image_folder(video_id).mkdir(parents=True, exist_ok=True)
     get_preview_mask_frames_folder_path(video_id).mkdir(parents=True, exist_ok=True)

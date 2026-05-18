@@ -338,6 +338,9 @@ def alpha_composite_gpu(foreground, background):
 def generate_motion_blur_image(video_id, blur_strength, blur_transparency, frame_skip):
     frames_paths = sorted(sv.list_files_with_extensions(directory=get_foreground_temp_image_folder(video_id).__str__(),
                                                         extensions=["png"]))
+    if not frames_paths:
+        raise ValueError("No foreground frames found. Run segmentation before generating motion blur.")
+
     prev_frame = cv2.imread(frames_paths[0].__str__())
     prev_frame = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2BGRA)
     _, prev_center_x, _, _, prev_center_y, _ = get_max_min_center_of_object(prev_frame)
@@ -390,14 +393,18 @@ def generate_motion_blur_image(video_id, blur_strength, blur_transparency, frame
         next_min_x, next_center_x, next_max_x, next_min_y, next_center_y, next_max_y = get_max_min_center_of_object(
             next_frame)
 
-        delta_x = center_x - next_center_x
-        delta_y = center_y - next_center_y
-        angle = np.degrees(np.arctan2(delta_x, delta_y)) + 90
-        magnitude = np.sqrt(delta_x ** 2 + delta_y ** 2) / np.sqrt((max_x - min_x) ** 2 + (max_y - min_y) ** 2) * 8
-        magnitude = np.min([magnitude, 5])
+        if has_usable_object_bounds(min_x, max_x, min_y, max_y) and has_usable_object_bounds(
+                next_min_x, next_max_x, next_min_y, next_max_y):
+            delta_x = center_x - next_center_x
+            delta_y = center_y - next_center_y
+            angle = np.degrees(np.arctan2(delta_x, delta_y)) + 90
+            magnitude = np.sqrt(delta_x ** 2 + delta_y ** 2) / np.sqrt((max_x - min_x) ** 2 + (max_y - min_y) ** 2) * 8
+            magnitude = np.min([magnitude, 5])
 
-        blurred_frame = create_blurred_frame_global_kernel(to_be_blurred_frame, magnitude, angle, min_x, min_y, max_x,
-                                                           max_y)
+            blurred_frame = create_blurred_frame_global_kernel(to_be_blurred_frame, magnitude, angle, min_x, min_y, max_x,
+                                                               max_y)
+        else:
+            blurred_frame = get_transparent_frame_like(to_be_blurred_frame)
         blurred_frame[:, :, 3] = (blurred_frame[:, :, 3] * blur_transparency).astype(np.uint8)
 
         blur_path = get_motion_blur_folder(video_id).joinpath(Path(os.path.basename(current_frame_path)).stem + ".png")
@@ -531,13 +538,36 @@ def get_max_min_center_of_object(frame):
     return min_x, center_x, max_x, min_y, center_y, max_y
 
 
+def has_usable_object_bounds(min_x, max_x, min_y, max_y):
+    return (max_x - min_x) > 0 and (max_y - min_y) > 0
+
+
+def ensure_bgra(frame):
+    if frame.shape[-1] == 4:
+        return frame.copy()
+    return cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+
+
+def get_transparent_frame_like(frame):
+    return np.zeros_like(ensure_bgra(frame))
+
+
 def create_blurred_frame_global_kernel(frame, magnitude, angle, min_x, min_y, max_x, max_y):
     global kernel_list
 
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+    if not np.isfinite(magnitude) or not np.isfinite(angle):
+        return get_transparent_frame_like(frame)
+
+    frame = ensure_bgra(frame)
     movement = np.floor(magnitude).astype(int)
     direction = np.floor((angle % 180) / angle_range).astype(int)
+    if movement < 0 or movement > kernel_list.shape[0] or direction < 0 or direction >= kernel_list.shape[1]:
+        return get_transparent_frame_like(frame)
+
     kernel = kernel_list[movement - 1][direction - 1]
+    if kernel is None:
+        return get_transparent_frame_like(frame)
+
     return cv2.filter2D(frame, -1, kernel)
 
 
